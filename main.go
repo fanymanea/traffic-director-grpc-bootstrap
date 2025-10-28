@@ -272,7 +272,7 @@ func validate(in configInput) error {
 		return fmt.Errorf("config-mesh may only contain letters, numbers, and '-'. It must begin with a letter and must not exceed 64 characters in length")
 	}
 
-	regionRe := regexp.MustCompile(`^[a-z]*-[a-z]*[0-9]*$`)
+	regionRe := regexp.MustCompile(`^[a-z]+-[a-z]+[0-9]+$`)
 	if in.xdsServerRegion != "" && !regionRe.MatchString(in.xdsServerRegion) {
 		return fmt.Errorf("invalid xDS server region: %s", in.xdsServerRegion)
 	}
