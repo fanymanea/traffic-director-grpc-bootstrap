@@ -55,6 +55,7 @@ var (
 	generateMeshID             = flag.Bool("generate-mesh-id", false, "When enabled, the CSM MeshID is generated. If config-mesh flag is specified, this flag would be ignored. Location and Cluster Name would be retrieved from the metadata server unless specified via gke-location and gke-cluster-name flags respectively.")
 	includeAllowedGrpcServices = flag.Bool("include-allowed-grpc-services-experimental", false, "When enabled, generates `allowed_grpc_services` map that includes current xDS Server URI. This flag is EXPERIMENTAL and may be changed or removed in a later release.")
 	isTrustedXDSServer         = flag.Bool("is-trusted-xds-server-experimental", false, "Whether to include the server feature trusted_xds_server for TD. This flag is EXPERIMENTAL and may be changed or removed in a later release.")
+	xdsServerRegion            = flag.String("xds-server-region-experimental", "", "The Cloud region (e.g. 'us-central1') of the xDS server to be used for regional setup.")
 )
 
 const (
@@ -207,6 +208,7 @@ func main() {
 		gitCommitHash:              gitCommitHash,
 		isTrustedXDSServer:         *isTrustedXDSServer,
 		includeAllowedGrpcServices: *includeAllowedGrpcServices,
+		xdsServerRegion:            *xdsServerRegion,
 	}
 
 	if err := validate(input); err != nil {
@@ -261,12 +263,18 @@ type configInput struct {
 	gitCommitHash              string
 	isTrustedXDSServer         bool
 	includeAllowedGrpcServices bool
+	xdsServerRegion            string
 }
 
 func validate(in configInput) error {
 	re := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,63}$`)
 	if in.configMesh != "" && !re.MatchString(in.configMesh) {
 		return fmt.Errorf("config-mesh may only contain letters, numbers, and '-'. It must begin with a letter and must not exceed 64 characters in length")
+	}
+
+	regionRe := regexp.MustCompile(`^[a-z]+-[a-z]+[0-9]+$`)
+	if in.xdsServerRegion != "" && !regionRe.MatchString(in.xdsServerRegion) {
+		return fmt.Errorf("invalid xDS server region: %s", in.xdsServerRegion)
 	}
 
 	return nil
@@ -325,6 +333,17 @@ func generate(in configInput) ([]byte, error) {
 			},
 		},
 		ClientDefaultListenerResourceNameTemplate: fmt.Sprintf("xdstp://%s/envoy.config.listener.v3.Listener/%d/%s/%%s", tdAuthority, in.gcpProjectNumber, networkIdentifier),
+	}
+
+	if in.xdsServerRegion != "" {
+		regionalTdAuthority := fmt.Sprintf("traffic-director.%s.xds.googleapis.com", in.xdsServerRegion)
+		regionalXdsServer := xdsServer
+		regionalXdsServer.ServerURI = fmt.Sprintf("trafficdirector.%s.rep.googleapis.com:443", in.xdsServerRegion)
+
+		c.Authorities[regionalTdAuthority] = Authority{
+			XDSServers: []server{regionalXdsServer},
+		        ClientListenerResourceNameTemplate: fmt.Sprintf("xdstp://%s/envoy.config.listener.v3.Listener/%d/%s/%%s", regionalTdAuthority, in.gcpProjectNumber, networkIdentifier),
+		}
 	}
 
 	for k, v := range in.metadataLabels {
